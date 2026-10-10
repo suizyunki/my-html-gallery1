@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>記憶の傾斜 — Slope of Memory</title>
+
+  <!-- Google Fonts: 映画的で洗練された明朝体と欧文書体 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Shippori+Mincho:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- GSAP & ScrollTrigger CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+
+  <style>
+    /* --------------------------------------------------
+       リセット＆ベーススタイル
+    -------------------------------------------------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      background-color: #000000;
+      color: #e0e0e0;
+      font-family: 'Shippori Mincho', serif;
+      overflow-x: hidden;
+      overscroll-behavior: none;
+    }
+
+    /* 仮想スクロール用の高さ確保（全5ステージ用） */
+    .scroll-wrapper {
+      position: relative;
+      width: 100%;
+      height: 600vh; /* スクロール領域の深さ */
+    }
+
+    /* --------------------------------------------------
+       画面固定コンテナ（全画面ピン留め）
+    -------------------------------------------------- */
+    .viewport-fixed {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #000;
+    }
+
+    /* --------------------------------------------------
+       画像レイヤー（1.PNG 〜 5.PNG）
+    -------------------------------------------------- */
+    .image-stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .image-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      will-change: opacity, transform, filter;
+      transition: filter 0.3s ease;
+    }
+
+    /* 初期状態：1枚目のみ表示 */
+    .image-layer:first-child {
+      opacity: 1;
+    }
+
+    /* 画像未配置時のフォールバック用プレースホルダー背景 */
+    .image-layer.fallback {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Cinzel', serif;
+      font-size: clamp(3rem, 10vw, 8rem);
+      color: rgba(255, 255, 255, 0.15);
+      background: radial-gradient(circle at center, #151515 0%, #000000 100%);
+    }
+
+    /* --------------------------------------------------
+       シネマティック・オーバーレイ（粒状ノイズ・ビネット）
+    -------------------------------------------------- */
+    .vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.85) 90%, #000000 100%);
+      z-index: 10;
+    }
+
+    .noise-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.045;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      z-index: 11;
+      mix-blend-mode: overlay;
+    }
+
+    /* 走査線（スキャンライン） */
+    .scanlines {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+      background-size: 100% 4px;
+      z-index: 12;
+      opacity: 0.6;
+    }
+
+    /* --------------------------------------------------
+       UIレイアウト
+    -------------------------------------------------- */
+    .ui-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: clamp(20px, 4vw, 48px);
+      box-sizing: border-box;
+    }
+
+    /* 上部ステータス */
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      letter-spacing: 0.15em;
+    }
+
+    .title-block h1 {
+      font-size: clamp(0.9rem, 2vw, 1.25rem);
+      font-weight: 600;
+      letter-spacing: 0.25em;
+      color: rgba(255, 255, 255, 0.85);
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    }
+
+    .title-block span {
+      display: block;
+      font-family: 'Cinzel', serif;
+      font-size: 0.65rem;
+      color: rgba(255, 255, 255, 0.4);
+      margin-top: 4px;
+      letter-spacing: 0.3em;
+    }
+
+    .status-block {
+      text-align: right;
+      font-family: 'Cinzel', monospace;
+    }
+
+    .stage-counter {
+      font-size: clamp(1rem, 2.5vw, 1.4rem);
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.9);
+      letter-spacing: 0.2em;
+    }
+
+    .erosion-rate {
+      font-size: clamp(0.7rem, 1.5vw, 0.85rem);
+      color: rgba(255, 255, 255, 0.45);
+      margin-top: 4px;
+      letter-spacing: 0.15em;
+      transition: color 0.3s ease;
+    }
+
+    .erosion-rate.critical {
+      color: #ff3344;
+      text-shadow: 0 0 8px rgba(255, 51, 68, 0.6);
+      animation: blink 1.2s infinite ease-in-out;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* 中央キャプション表示領域 */
+    .caption-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(85%, 680px);
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .caption-item {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 100%;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .caption-item p {
+      font-size: clamp(1rem, 2.4vw, 1.45rem);
+      line-height: 2.2;
+      letter-spacing: 0.25em;
+      color: rgba(240, 240, 240, 0.9);
+      text-shadow: 0 0 20px rgba(0, 0, 0, 0.9), 0 0 10px rgba(255, 255, 255, 0.2);
+    }
+
+    .caption-item.active {
+      opacity: 1;
+    }
+
+    /* 下部スクロールガイド */
+    .footer-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    .scroll-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: 'Cinzel', serif;
+    }
+
+    .scroll-line {
+      width: 36px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .scroll-line::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
+      animation: lineMove 2s infinite ease-in-out;
+    }
+
+    @keyframes lineMove {
+      0% { left: -100%; }
+      50% { left: 100%; }
+      100% { left: 100%; }
+    }
+
+    /* --------------------------------------------------
+       最終ステージ（5.PNG到達時）の崩壊エフェクト
+    -------------------------------------------------- */
+    .glitch-active {
+      animation: cameraShake 0.12s infinite alternate ease-in-out;
+    }
+
+    @keyframes cameraShake {
+      0% { transform: translate(0, 0) scale(1.05); }
+      50% { transform: translate(-1.5px, 1.5px) scale(1.06); }
+      100% { transform: translate(1.5px, -1px) scale(1.05); }
+    }
+
+    .aberration-filter {
+      filter: contrast(140%) saturate(130%) hue-rotate(5deg);
+    }
+
+    /* エンドセクション（再体験ボタン） */
+    .end-prompt {
+      position: absolute;
+      bottom: 12%;
+      left: 50%;
+      transform: translateX(-50%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1s ease;
+      text-align: center;
+      z-index: 30;
+    }
+
+    .end-prompt.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .restart-btn {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      color: rgba(255, 255, 255, 0.85);
+      font-family: 'Cinzel', serif;
+      padding: 10px 24px;
+      font-size: 0.75rem;
+      letter-spacing: 0.3em;
+      cursor: pointer;
+      transition: all 0.4s ease;
+      backdrop-filter: blur(4px);
+    }
+
+    .restart-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: #fff;
+      color: #fff;
+      box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- スクロール検知用コンテナ -->
+  <div class="scroll-wrapper" id="scrollWrapper">
+    <!-- 固定ビューポート -->
+    <div class="viewport-fixed" id="viewport">
+
+      <!-- 画像レイヤー群 (1.PNG 〜 5.PNG) -->
+      <div class="image-stage" id="imageStage">
+        <!-- 読み込み失敗時は自動的にフォールバック表示 -->
+        <img class="image-layer" src="1.PNG" alt="Phase 1" onerror="handleImageError(this, 1)">
+        <img class="image-layer" src="2.PNG" alt="Phase 2" onerror="handleImageError(this, 2)">
+        <img class="image-layer" src="3.PNG" alt="Phase 3" onerror="handleImageError(this, 3)">
+        <img class="image-layer" src="4.PNG" alt="Phase 4" onerror="handleImageError(this, 4)">
+        <img class="image-layer" src="5.PNG" alt="Phase 5" onerror="handleImageError(this, 5)">
+      </div>
+
+      <!-- シネマティック演出レイヤー -->
+      <div class="vignette"></div>
+      <div class="noise-overlay"></div>
+      <div class="scanlines"></div>
+
+      <!-- 洗練されたミニマルUI -->
+      <div class="ui-layer">
+        <header class="header-bar">
+          <div class="title-block">
+            <h1>記憶の傾斜</h1>
+            <span>SLOPE OF MEMORY</span>
+          </div>
+          <div class="status-block">
+            <div class="stage-counter" id="stageCounter">1 / 5</div>
+            <div class="erosion-rate" id="erosionRate">記憶の浸食率 20%</div>
+          </div>
+        </header>
+
+        <!-- 各段階ごとの抽象的キャプションテキスト -->
+        <div class="caption-container">
+          <div class="caption-item active" data-index="0">
+            <p>見慣れた日常。<br>朝の光が輪郭を穏やかにつなぎとめている。</p>
+          </div>
+          <div class="caption-item" data-index="1">
+            <p>わずかな違和感。<br>影の落ちる角度が、記憶と合致しない。</p>
+          </div>
+          <div class="caption-item" data-index="2">
+            <p>浸食の兆候。<br>誰もいないはずの空間に、微かな歪みが生じる。</p>
+          </div>
+          <div class="caption-item" data-index="3">
+            <p>輪郭の融解。<br>かつて日常だったものが、異質な法則に従い始めた。</p>
+          </div>
+          <div class="caption-item" data-index="4">
+            <p>記憶の崩壊。<br>ここはもう、私の知る場所ではない。</p>
+          </div>
+        </div>
+
+        <footer class="footer-bar">
+          <div class="scroll-indicator" id="scrollIndicator">
+            <span class="scroll-line"></span>
+            <span>SCROLL / SWIPE TO DESCEND</span>
+          </div>
+          <div class="credit">EXHIBITION 2026</div>
+        </footer>
+
+        <!-- 最終フェーズ到達時のボタン -->
+        <div class="end-prompt" id="endPrompt">
+          <button class="restart-btn" onclick="scrollToTop()">RESET MEMORY</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    gsap.registerPlugin(ScrollTrigger);
+
+    // 画像が存在しない場合のテスト用フォールバック
+    function handleImageError(img, stageNum) {
+      const fallbackDiv = document.createElement('div');
+      fallbackDiv.className = img.className + ' fallback';
+      fallbackDiv.innerText = 'STAGE ' + stageNum;
+      img.parentNode.replaceChild(fallbackDiv, img);
+    }
+
+    const layers = gsap.utils.toArray('.image-layer');
+    const captions = gsap.utils.toArray('.caption-item');
+    const stageCounter = document.getElementById('stageCounter');
+    const erosionRate = document.getElementById('erosionRate');
+    const viewport = document.getElementById('viewport');
+    const endPrompt = document.getElementById('endPrompt');
+    const scrollIndicator = document.getElementById('scrollIndicator');
+
+    const totalStages = 5;
+
+    // メインのスクロール駆動タイムライン
+    const tl = gsap.timeline({
+      scrollTrigger: {
+        trigger: "#scrollWrapper",
+        start: "top top",
+        end: "bottom bottom",
+        scrub: 1.2, // 滑らかな追従（慣性・スムージング）
+        onUpdate: (self) => {
+          updateUI(self.progress);
+        }
+      }
+    });
+
+    // 1 -> 2 -> 3 -> 4 -> 5 への滑らかなクロスフェード＆微細なパララックスズーム
+    // 各レイヤーを順番に透明度とスケールでブレンドしていく
+    for (let i = 1; i < layers.length; i++) {
+      tl.to(layers[i], {
+        opacity: 1,
+        ease: "power1.inOut",
+        duration: 1
+      }, (i - 1) * 1);
+
+      // 前のレイヤーを少し奥に沈める微細なズーム（深度演出）
+      tl.to(layers[i - 1], {
+        scale: 1.05,
+        filter: "blur(2px)",
+        ease: "none",
+        duration: 1
+      }, (i - 1) * 1);
+    }
+
+    // 最後のレイヤー（5.PNG）到達後の歪みと崩壊エフェクト
+    tl.to(layers[4], {
+      scale: 1.12,
+      filter: "contrast(180%) saturate(150%) hue-rotate(-20deg)",
+      ease: "power2.inOut",
+      duration: 0.8
+    });
+
+    // UIとキャプションの更新関数
+    function updateUI(progress) {
+      // 0.0 〜 1.0 の進捗からステージ番号（1〜5）を計算
+      const stageFloat = progress * (totalStages - 1);
+      const currentIndex = Math.min(Math.floor(stageFloat + 0.3), totalStages - 1);
+      
+      // 浸食率の計算（20% 〜 100%）
+      const percentage = Math.min(Math.round(20 + progress * 80), 100);
+
+      stageCounter.innerText = `${currentIndex + 1} / 5`;
+
+      if (percentage >= 98) {
+        erosionRate.innerText = `記憶の浸食率 100% [ CRITICAL ]`;
+        erosionRate.classList.add('critical');
+        viewport.classList.add('glitch-active');
+        endPrompt.classList.add('visible');
+        scrollIndicator.style.opacity = '0';
+      } else {
+        erosionRate.innerText = `記憶の浸食率 ${percentage}%`;
+        erosionRate.classList.remove('critical');
+        viewport.classList.remove('glitch-active');
+        endPrompt.classList.remove('visible');
+        scrollIndicator.style.opacity = '1';
+      }
+
+      // キャプションの切り替え
+      captions.forEach((cap, idx) => {
+        if (idx === currentIndex) {
+          cap.classList.add('active');
+        } else {
+          cap.classList.remove('active');
+        }
+      });
+    }
+
+    // 最初に戻る
+    function scrollToTop() {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    }
+
+    // iOS/Androidでのアドレスバーリサイズ時のチラつき対策
+    window.addEventListener('resize', () => {
+      ScrollTrigger.refresh();
+    });
+  </script>
+</body>
+</html>
